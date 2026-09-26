@@ -31,8 +31,8 @@
   <section class="card">
     <div class="card-header">
       <div>
-        <h2>Accuracy en el tiempo</h2>
-        <p class="caption">Promedio por ciclo evaluado, comparado contra el baseline shift-24h. Lineas punteadas marcan reentrenamientos y senales de drift.</p>
+        <h2>Accuracy en el tiempo (oficial)</h2>
+        <p class="caption">Mismo numero que el leaderboard del curso: cuenta cobertura, cada ciclo faltante pesa como 0%. Lineas punteadas marcan reentrenamientos y senales de drift.</p>
       </div>
       <div id="accuracy-tabs" class="tabs">
         <button data-tab="cumulative" class="active">Acumulada</button>
@@ -46,6 +46,16 @@
       <span class="item"><span class="swatch" style="background:var(--critical)"></span> Drift detectado</span>
     </div>
     <div class="chart-wrap" id="accuracy-chart-svg"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Calidad de las predicciones enviadas</h2>
+        <p class="caption">Diagnostico aparte: promedio de cada ciclo que SI enviamos (no penaliza los ciclos que faltaron -- para eso esta la grafica de arriba). Sirve para ver si el modelo en si sigue siendo bueno.</p>
+      </div>
+    </div>
+    <div class="chart-wrap" id="submission-quality-svg"></div>
   </section>
 
   <section class="card">

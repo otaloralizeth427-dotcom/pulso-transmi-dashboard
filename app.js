@@ -153,49 +153,68 @@ function buildCycleSeries(accuracyRows) {
   return points;
 }
 
-function renderAccuracyChart({ accuracyRows, models, leaderboard }) {
-  const container = document.getElementById("accuracy-chart-svg");
-  const points = buildCycleSeries(accuracyRows);
-
-  if (points.length === 0) {
-    container.innerHTML = `<p class="empty-note">Todavia no hay ciclos evaluados para graficar.</p>`;
-    return;
-  }
-
-  let series;
-  if (accuracyChartState.tab === "cumulative") {
-    let running = 0;
-    series = points.map((p, i) => {
-      running += p.accuracy;
-      return { x: p.x, y: running / (i + 1) };
-    });
-  } else {
-    const cutoff = new Date(points[points.length - 1].x.getTime() - 24 * 3600 * 1000);
-    series = points.filter((p) => p.x >= cutoff).map((p) => ({ x: p.x, y: p.accuracy }));
-    if (series.length === 0) series = points.slice(-1).map((p) => ({ x: p.x, y: p.accuracy }));
-  }
-
-  const active = models.find((m) => m.is_active);
-  const baselineAccuracy = active?.metrics_summary?.baseline_accuracy ?? null;
-
+function retrainAndDriftAnnotations(models, leaderboard, from, to) {
   const retrainEvents = models
     .filter((m) => m.model_version.startsWith("catboost-"))
     .map((m) => ({ x: new Date(m.trained_at), label: `Reentrenado: ${m.model_version}` }));
   const driftEvents = leaderboard
     .filter((l) => l.signal === "performance_drift")
     .map((l) => ({ x: new Date(l.checked_at), label: "Drift detectado" }));
-  const annotations = [...retrainEvents, ...driftEvents].filter(
-    (a) => a.x >= series[0].x && a.x <= series[series.length - 1].x
-  );
+  return [...retrainEvents, ...driftEvents].filter((a) => a.x >= from && a.x <= to);
+}
 
-  container.innerHTML = renderLineChart({
-    series,
-    baselineY: baselineAccuracy,
-    annotations,
-    color: "var(--brand)",
-    yLabel: "accuracy %",
-  });
-  attachLineChartInteraction(container, series, baselineAccuracy);
+/**
+ * Main chart: the OFFICIAL accuracy history from /v1/leaderboard, exactly
+ * as monitor.py recorded it over time -- this is the same number the
+ * course portal shows (coverage-weighted, missed cycles count as zero).
+ * It intentionally does NOT use accuracyRows/buildCycleSeries below, which
+ * only average the cycles we actually submitted and read much higher --
+ * plotting those on this chart looked like it contradicted the official
+ * number shown one card up, which is why this got split out.
+ */
+function renderAccuracyChart({ models, leaderboard }) {
+  const container = document.getElementById("accuracy-chart-svg");
+  const windowKind = accuracyChartState.tab === "cumulative" ? "cumulative" : "rolling_24h";
+  const snapshots = leaderboard
+    .filter((l) => l.window_kind === windowKind)
+    .map((l) => ({ x: new Date(l.checked_at), y: l.accuracy }))
+    .sort((a, b) => a.x - b.x);
+
+  if (snapshots.length === 0) {
+    container.innerHTML = `<p class="empty-note">Todavia no hay lecturas del leaderboard oficial guardadas.</p>`;
+    return;
+  }
+  if (snapshots.length === 1) {
+    const only = snapshots[0];
+    container.innerHTML = `<p class="empty-note">Solo hay una lectura oficial todavia: <b>${only.y.toFixed(1)}%</b>
+      (${only.x.toLocaleString("es-CO")}). La curva se empieza a trazar con las siguientes corridas del pipeline.</p>`;
+    return;
+  }
+
+  const active = models.find((m) => m.is_active);
+  const baselineAccuracy = active?.metrics_summary?.baseline_accuracy ?? null;
+  const annotations = retrainAndDriftAnnotations(models, leaderboard, snapshots[0].x, snapshots[snapshots.length - 1].x);
+
+  container.innerHTML = renderLineChart({ series: snapshots, baselineY: baselineAccuracy, annotations, color: "var(--brand)" });
+  attachLineChartInteraction(container, snapshots, baselineAccuracy);
+}
+
+/**
+ * Secondary, clearly-separate diagnostic: average accuracy of the cycles we
+ * actually submitted (nothing about coverage). Useful to see "is the model
+ * itself still good" independent of how many cycles we caught.
+ */
+function renderSubmissionQuality(accuracyRows) {
+  const container = document.getElementById("submission-quality-svg");
+  if (!container) return;
+  const points = buildCycleSeries(accuracyRows);
+  if (points.length === 0) {
+    container.innerHTML = `<p class="empty-note">Todavia no hay ciclos evaluados.</p>`;
+    return;
+  }
+  const series = points.map((p) => ({ x: p.x, y: p.accuracy }));
+  container.innerHTML = renderLineChart({ series, baselineY: null, annotations: [], color: "var(--brand-pink)", height: 180 });
+  attachLineChartInteraction(container, series, null);
 }
 
 function renderLineChart({ series, baselineY, annotations, color, width = 900, height = 260 }) {
@@ -405,6 +424,7 @@ async function refresh() {
     renderStatusBanner(data.runs);
     renderStatTiles(data);
     renderAccuracyChart(data);
+    renderSubmissionQuality(data.accuracyRows);
     renderStationBars(data.stationAccuracy);
     renderDriftHeatmap(data.accuracyRows);
     renderRunHistory(data.runs);
