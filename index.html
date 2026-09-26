@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pulso TransMi · Panel</title>
+<meta name="description" content="Panel de solo lectura del pipeline MLOps de Pulso TransMi: accuracy, cobertura, drift y estado de las corridas." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💜</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="brand-mark">🚌</div>
+    <div class="brand-text">
+      <h1>Pulso TransMi</h1>
+      <p>Panel operativo · solo lectura</p>
+    </div>
+  </div>
+  <div id="last-updated" style="font-size:12px;color:var(--ink-muted)">Cargando…</div>
+</header>
+
+<main>
+  <div id="status-banner" class="status-banner"></div>
+
+  <section id="stat-row" class="stat-row"></section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Accuracy en el tiempo</h2>
+        <p class="caption">Promedio por ciclo evaluado, comparado contra el baseline shift-24h. Lineas punteadas marcan reentrenamientos y senales de drift.</p>
+      </div>
+      <div id="accuracy-tabs" class="tabs">
+        <button data-tab="cumulative" class="active">Acumulada</button>
+        <button data-tab="rolling24h">Ultimas 24h</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--brand)"></span> Nuestro modelo</span>
+      <span class="item"><span class="swatch dashed"></span> Baseline (shift 24h)</span>
+      <span class="item"><span class="swatch" style="background:var(--brand-pink)"></span> Reentrenamiento</span>
+      <span class="item"><span class="swatch" style="background:var(--critical)"></span> Drift detectado</span>
+    </div>
+    <div class="chart-wrap" id="accuracy-chart-svg"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Accuracy por estacion</h2>
+        <p class="caption">Promedio historico de las 12 estaciones evaluadas.</p>
+      </div>
+    </div>
+    <div id="station-bars" class="station-bars"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Mapa de drift por estacion y horizonte</h2>
+        <p class="caption">Accuracy promedio por estacion y horizonte de prediccion. Verde = bueno, rojo = revisar.</p>
+      </div>
+    </div>
+    <div class="heatmap-wrap" id="drift-heatmap"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Historial de corridas</h2>
+        <p class="caption">Ultimas ejecuciones del pipeline (collector + prediccion + envio).</p>
+      </div>
+    </div>
+    <table class="runs">
+      <thead><tr><th>Cuando</th><th>Estado</th><th>Modelo</th><th>Submission</th></tr></thead>
+      <tbody id="run-history-body"></tbody>
+    </table>
+  </section>
+</main>
+
+<footer class="page-footer">
+  Datos leidos directamente de Supabase con la clave publica (solo lectura). Se actualiza cada minuto.
+</footer>
+
+<div id="viz-tooltip" class="viz-tooltip"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
