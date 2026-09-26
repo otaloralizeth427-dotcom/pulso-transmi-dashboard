@@ -317,7 +317,7 @@ function accuracyToColor(acc) {
   // Continuous good -> warning -> critical scale, reserved for this
   // health/alert reading specifically (not used as a brand series color
   // anywhere else in the dashboard).
-  if (acc === null || acc === undefined) return "#d8d0da";
+  if (acc === null || acc === undefined) return "#8a7c8f"; /* muted plum: white text stays legible */
   if (acc >= 75) return "#0ca30c";
   if (acc >= 60) return "#5fae12";
   if (acc >= 45) return "#fab219";
