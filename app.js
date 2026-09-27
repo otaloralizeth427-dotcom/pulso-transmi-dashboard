@@ -14,14 +14,16 @@ async function fetchView(name, query = "") {
 }
 
 async function loadAll() {
-  const [runs, models, accuracyRows, stationAccuracy, leaderboard] = await Promise.all([
+  const [runs, models, accuracyRows, stationAccuracy, leaderboard, driftEvents, retrainTriggers] = await Promise.all([
     fetchView("v_pipeline_status", "&order=started_at.desc"),
     fetchView("v_model_state", "&order=trained_at.desc"),
     fetchView("v_accuracy_timeseries", "&order=computed_at.asc"),
     fetchView("v_station_accuracy"),
     fetchView("v_leaderboard_snapshots", "&order=checked_at.desc"),
+    fetchView("v_drift_events", "&order=checked_at.desc&limit=200"),
+    fetchView("v_retrain_triggers", "&order=triggered_at.desc"),
   ]);
-  return { runs, models, accuracyRows, stationAccuracy, leaderboard };
+  return { runs, models, accuracyRows, stationAccuracy, leaderboard, driftEvents, retrainTriggers };
 }
 
 /* ------------------------------------------------------------- helpers -- */
@@ -402,6 +404,105 @@ function renderRunHistory(runs) {
     .join("");
 }
 
+/* ------------------------------------------------------- drift monitoring */
+
+function latestByStation(driftEvents) {
+  const byStation = new Map();
+  for (const e of driftEvents) {
+    if (!byStation.has(e.station_id)) byStation.set(e.station_id, e); // already sorted desc by checked_at
+  }
+  return byStation;
+}
+
+function stationSemaphore(latest) {
+  if (!latest) return { level: "unknown", label: "Sin datos" };
+  if (latest.performance_confirmed) return { level: "critical", label: "Performance degradada (confirmado)" };
+  if (latest.performance_flag) return { level: "critical", label: "Performance degradada (sin confirmar aun)" };
+  if (latest.psi_flag) return { level: "warning", label: "Drift de datos, sin caida de performance" };
+  return { level: "good", label: "Sin drift" };
+}
+
+function renderStationSemaphore(driftEvents) {
+  const wrap = document.getElementById("station-semaphore");
+  const latestMap = latestByStation(driftEvents);
+  if (latestMap.size === 0) {
+    wrap.innerHTML = `<p class="empty-note">Todavia no hay chequeos de drift registrados.</p>`;
+    return;
+  }
+  wrap.innerHTML = STATIONS_ORDER.map((sid) => {
+    const latest = latestMap.get(sid);
+    const sem = stationSemaphore(latest);
+    const psiTxt = latest && latest.psi_max_value != null ? `PSI ${latest.psi_max_value.toFixed(2)} (${latest.psi_max_feature})` : "PSI —";
+    const wapeTxt = latest && latest.rolling_wape_24h != null ? `WAPE 24h ${(latest.rolling_wape_24h * 100).toFixed(1)}%` : "";
+    return `<div class="semaphore-tile" data-tip="Estacion ${sid}: ${sem.label}. ${psiTxt}. ${wapeTxt}">
+      <span class="dot ${sem.level}"></span>
+      <span class="sid">${sid}</span>
+    </div>`;
+  }).join("");
+
+  wrap.querySelectorAll(".semaphore-tile").forEach((tile) => {
+    tile.addEventListener("mousemove", (e) => showTooltip(e.clientX, e.clientY, tile.getAttribute("data-tip")));
+    tile.addEventListener("mouseleave", hideTooltip);
+  });
+}
+
+function renderLastDriftEvent(driftEvents) {
+  const el = document.getElementById("last-drift-event");
+  const notable = driftEvents.find((e) => e.psi_flag || e.performance_flag);
+  if (!notable) {
+    el.innerHTML = `<p class="empty-note">Ninguna senal de drift detectada todavia.</p>`;
+    return;
+  }
+  const when = new Date(notable.checked_at).toLocaleString("es-CO");
+  const kind = notable.performance_confirmed
+    ? "Performance degradada (confirmado, 3+ ciclos)"
+    : notable.performance_flag
+    ? "Performance degradada (1er ciclo, sin confirmar)"
+    : "Drift de datos (PSI)";
+  const featureTxt = notable.psi_max_feature
+    ? `Feature <b>${notable.psi_max_feature}</b> se movio a PSI ${notable.psi_max_value.toFixed(2)} (umbral 0.20) frente a la ventana de entrenamiento del champion.`
+    : "";
+  const perfTxt = notable.rolling_wape_24h != null
+    ? `WAPE rodante 24h: ${(notable.rolling_wape_24h * 100).toFixed(1)}% vs. accuracy de validacion del champion ${notable.champion_valid_accuracy != null ? notable.champion_valid_accuracy.toFixed(1) + "%" : "—"}.`
+    : "";
+  el.innerHTML = `
+    <div class="drift-event-card">
+      <div class="drift-event-head">
+        <span class="pill ${notable.performance_confirmed ? "failed" : notable.performance_flag ? "running" : "running"}">${kind}</span>
+        <span class="sub">${when} · estacion ${notable.station_id}</span>
+      </div>
+      <p>${featureTxt}</p>
+      <p>${perfTxt}</p>
+    </div>`;
+}
+
+function renderRetrainHistory(retrainTriggers) {
+  const tbody = document.getElementById("retrain-history-body");
+  if (!retrainTriggers.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-note">Ningun reentrenamiento disparado por drift todavia.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = retrainTriggers
+    .map((t) => {
+      const when = new Date(t.triggered_at).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+      let outcome;
+      if (t.status === "dispatched") outcome = `<span class="pill running">En curso</span>`;
+      else if (t.promoted) outcome = `<span class="pill success">Promovido</span>`;
+      else outcome = `<span class="pill failed">Descartado</span>`;
+      const metrics = t.candidate_accuracy != null
+        ? `candidato ${t.candidate_accuracy.toFixed(1)}% vs champion ${t.champion_accuracy != null ? t.champion_accuracy.toFixed(1) + "%" : "—"}`
+        : "—";
+      return `<tr>
+        <td>${when}</td>
+        <td class="mono">${(t.stations || []).join(", ")}</td>
+        <td>${outcome}</td>
+        <td>${metrics}</td>
+        <td class="mono">${t.candidate_version || "—"}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 /* ------------------------------------------------------------- tabs ----- */
 
 function wireTabs() {
@@ -427,6 +528,9 @@ async function refresh() {
     renderSubmissionQuality(data.accuracyRows);
     renderStationBars(data.stationAccuracy);
     renderDriftHeatmap(data.accuracyRows);
+    renderStationSemaphore(data.driftEvents);
+    renderLastDriftEvent(data.driftEvents);
+    renderRetrainHistory(data.retrainTriggers);
     renderRunHistory(data.runs);
     document.getElementById("last-updated").textContent = `Actualizado ${new Date().toLocaleTimeString("es-CO")}`;
   } catch (err) {

@@ -71,11 +71,41 @@
   <section class="card">
     <div class="card-header">
       <div>
-        <h2>Mapa de drift por estacion y horizonte</h2>
+        <h2>Mapa de accuracy por estacion y horizonte</h2>
         <p class="caption">Accuracy promedio por estacion y horizonte de prediccion. Verde = bueno, rojo = revisar.</p>
       </div>
     </div>
     <div class="heatmap-wrap" id="drift-heatmap"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Monitoreo de drift</h2>
+        <p class="caption">PSI (demanda vs. la misma hora de ayer) y WAPE rodante 24h por estacion, contra la ventana de entrenamiento y el accuracy de validacion del champion activo.</p>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--good)"></span> Sin drift</span>
+      <span class="item"><span class="swatch" style="background:var(--warning)"></span> Drift de datos, performance estable</span>
+      <span class="item"><span class="swatch" style="background:var(--critical)"></span> Performance degradada</span>
+    </div>
+    <div id="station-semaphore" class="semaphore-grid"></div>
+    <h3 class="subhead">Ultimo evento detectado</h3>
+    <div id="last-drift-event"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Reentrenamientos por drift</h2>
+        <p class="caption">Se disparan solo (workflow_dispatch) cuando el monitoreo confirma performance drift -- ningun workflow corre "por si acaso".</p>
+      </div>
+    </div>
+    <table class="runs">
+      <thead><tr><th>Cuando</th><th>Estaciones</th><th>Resultado</th><th>Metricas</th><th>Version</th></tr></thead>
+      <tbody id="retrain-history-body"></tbody>
+    </table>
   </section>
 
   <section class="card">

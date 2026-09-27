@@ -330,6 +330,55 @@ footer.page-footer {
 
 .empty-note { font-size: 12.5px; color: var(--ink-muted); padding: 12px 0; }
 
+/* Drift monitoring */
+.subhead {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  margin: 4px 0 0;
+  font-weight: 700;
+}
+.semaphore-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+.semaphore-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: default;
+}
+.semaphore-tile .sid { font-size: 11.5px; color: var(--ink-secondary); font-variant-numeric: tabular-nums; }
+.semaphore-tile .dot { width: 14px; height: 14px; border-radius: 50%; }
+.semaphore-tile .dot.good { background: var(--good); }
+.semaphore-tile .dot.warning { background: var(--warning); }
+.semaphore-tile .dot.critical { background: var(--critical); }
+.semaphore-tile .dot.unknown { background: var(--ink-muted); }
+
+.drift-event-card {
+  border-left: 3px solid var(--critical);
+  background: var(--critical-soft);
+  border-radius: 0 10px 10px 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drift-event-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.drift-event-card p { margin: 0; font-size: 13px; color: var(--ink-secondary); }
+.drift-event-card p:empty { display: none; }
+
 @media (max-width: 640px) {
   .card-header { flex-direction: column; align-items: flex-start; }
   table.heatmap { font-size: 10.5px; }
