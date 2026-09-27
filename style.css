@@ -2,24 +2,25 @@
 :root {
   color-scheme: light;
 
-  --bg: #fbf7fc;
+  --bg: #fdf3f9;
   --surface: #ffffff;
-  --surface-2: #f7effa;
-  --border: #ead9f0;
-  --ink: #221527;
-  --ink-secondary: #6b5570;
-  --ink-muted: #9a8aa0;
-  --grid: #ede0f0;
+  --surface-2: #fbe8f3;
+  --border: #f6d3e8;
+  --ink: #2b1620;
+  --ink-secondary: #7a4a63;
+  --ink-muted: #a884a0;
+  --grid: #f3dcec;
 
-  --brand: #7c3aed;
-  --brand-dark: #5b21b6;
-  --brand-soft: #f1e6fd;
-  --brand-pink: #db2777;
-  --brand-pink-soft: #fce7f3;
-  --baseline: #a8a0ac;
+  --brand: #df4fa8;
+  --brand-dark: #b8317f;
+  --brand-soft: #fbe1f1;
+  --brand-pink: #e8709c;
+  --brand-pink-soft: #fce9ef;
+  --baseline: #b09aa9;
 
   /* Status palette -- reserved for alerts/drift/errors only, never reused
-     as a data-series color. Kept distinct from the brand hues on purpose. */
+     as a data-series color. Kept distinct from the brand hues on purpose
+     (and untouched when the brand palette changes). */
   --good: #0ca30c;
   --good-soft: #e7f7e7;
   --warning: #fab219;
@@ -29,7 +30,7 @@
   --critical-soft: #fbe9e9;
 
   --radius: 14px;
-  --shadow: 0 1px 2px rgba(34, 21, 39, 0.06), 0 8px 24px -12px rgba(124, 58, 237, 0.18);
+  --shadow: 0 1px 2px rgba(43, 22, 32, 0.06), 0 8px 24px -12px rgba(223, 79, 168, 0.20);
 }
 
 * { box-sizing: border-box; }
