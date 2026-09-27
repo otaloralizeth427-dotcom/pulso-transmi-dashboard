@@ -95,12 +95,28 @@ function renderStatusBanner(runs) {
 
 /* ------------------------------------------------------- 2. stat tiles -- */
 
-function renderStatTiles({ runs, models, leaderboard }) {
+function last6CyclesApprox(accuracyRows) {
+  // The portal's own "ultimos 6 ciclos" number comes from a session-only
+  // endpoint (/v1/portal/accuracy-chart) the pipeline's API key can't call
+  // -- only window=cumulative/rolling_24h are exposed that way. This is a
+  // local approximation over our last 6 RESOLVED submitted cycles, so it
+  // can read a bit optimistic if a cycle was missed in between (a true
+  // miss would count as 0% in the portal's window; this one just skips
+  // over gaps since there's nothing to average for a cycle never submitted).
+  const points = buildCycleSeries(accuracyRows);
+  const last6 = points.slice(-6);
+  if (last6.length === 0) return null;
+  const mean = last6.reduce((sum, p) => sum + p.accuracy, 0) / last6.length;
+  return { accuracy: mean, n: last6.length };
+}
+
+function renderStatTiles({ runs, models, leaderboard, accuracyRows }) {
   const wrap = document.getElementById("stat-row");
   const active = models.find((m) => m.is_active) || models[0];
   const cumulative = latestByWindow(leaderboard, "cumulative");
   const rolling = latestByWindow(leaderboard, "rolling_24h");
   const successfulSubmissions = runs.filter((r) => r.status === "success" && parseNotes(r.notes).isSubmission).length;
+  const last6 = last6CyclesApprox(accuracyRows);
 
   const tiles = [
     {
@@ -123,6 +139,11 @@ function renderStatTiles({ runs, models, leaderboard }) {
       value: rolling ? fmtPct(rolling.accuracy) : "—",
       sub: rolling ? `Cobertura ${fmtPct(rolling.coverage * 100)}` : "Sin datos recientes",
       alert: rolling && cumulative && cumulative.accuracy - rolling.accuracy >= 5,
+    },
+    {
+      eyebrow: "Ultimos 6 ciclos (aprox.)",
+      value: last6 ? fmtPct(last6.accuracy) : "—",
+      sub: last6 ? `Promedio de tus ultimos ${last6.n} ciclos enviados -- no es el numero oficial del portal` : "Sin ciclos evaluados todavia",
     },
   ];
 
@@ -446,6 +467,83 @@ function renderStationSemaphore(driftEvents) {
   });
 }
 
+function renderDriftPsiChart(driftEvents) {
+  const container = document.getElementById("drift-psi-chart");
+  if (!container) return;
+
+  // One point per check: the WORST (max) PSI across all 12 stations at
+  // that checked_at, so a single line shows "how close is our worst
+  // station to the 0.2 threshold" over time, with the threshold itself
+  // drawn as the reference line (reusing the same chart the baseline
+  // comparison uses elsewhere on this dashboard).
+  const byCheck = new Map();
+  for (const e of driftEvents) {
+    if (e.psi_max_value == null) continue;
+    const key = e.checked_at;
+    if (!byCheck.has(key) || byCheck.get(key).psi < e.psi_max_value) {
+      byCheck.set(key, { psi: e.psi_max_value, station_id: e.station_id, feature: e.psi_max_feature });
+    }
+  }
+  const series = [...byCheck.entries()]
+    .map(([checked_at, v]) => ({ x: new Date(checked_at), y: v.psi, station_id: v.station_id, feature: v.feature }))
+    .sort((a, b) => a.x - b.x);
+
+  if (series.length < 2) {
+    container.innerHTML = `<p class="empty-note">Todavia no hay suficientes chequeos de PSI para graficar una tendencia.</p>`;
+    return;
+  }
+
+  // Scale to whatever the data needs (PSI has no fixed 0-100 ceiling like
+  // accuracy) -- renderLineChart's y-axis assumes 0-100, so this draws its
+  // own compact axis instead of reusing that helper directly.
+  const width = 900, height = 200;
+  const pad = { top: 16, right: 16, bottom: 26, left: 40 };
+  const w = width - pad.left - pad.right, h = height - pad.top - pad.bottom;
+  const xs = series.map((p) => p.x.getTime());
+  const xMin = Math.min(...xs), xMax = Math.max(...xs), xSpan = Math.max(xMax - xMin, 1);
+  const yMax = Math.max(0.4, ...series.map((p) => p.y)) * 1.1;
+  const sx = (t) => pad.left + ((t - xMin) / xSpan) * w;
+  const sy = (v) => pad.top + h - (Math.max(0, v) / yMax) * h;
+
+  const linePath = series.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x.getTime()).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+  const gridVals = [0, yMax / 2, yMax];
+  const gridlines = gridVals
+    .map((v) => `<line class="gridline" x1="${pad.left}" x2="${pad.left + w}" y1="${sy(v)}" y2="${sy(v)}" />
+       <text x="${pad.left - 8}" y="${sy(v) + 4}" font-size="10" text-anchor="end">${v.toFixed(2)}</text>`)
+    .join("");
+  const thresholdY = sy(0.2);
+  const thresholdLine = `<line x1="${pad.left}" x2="${pad.left + w}" y1="${thresholdY}" y2="${thresholdY}"
+      stroke="var(--critical)" stroke-width="2" stroke-dasharray="5 4" />
+      <text x="${pad.left + w}" y="${thresholdY - 5}" font-size="10" text-anchor="end" fill="var(--critical)">umbral 0.20</text>`;
+  const dots = series
+    .map((p) => {
+      const x = sx(p.x.getTime()), y = sy(p.y);
+      const over = p.y > 0.2;
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="transparent" class="hit-dot"
+                data-x="${x}" data-y="${y}" data-val="${p.y.toFixed(3)}" data-station="${p.station_id}" data-feature="${p.feature}" data-t="${p.x.toISOString()}" />
+              <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${over ? "var(--critical)" : "var(--brand)"}" />`;
+    })
+    .join("");
+  const xTicks = [series[0], series[series.length - 1]]
+    .map((p, i) => `<text x="${sx(p.x.getTime())}" y="${height - 6}" font-size="10" text-anchor="${i === 0 ? "start" : "end"}">${p.x.toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</text>`)
+    .join("");
+
+  container.innerHTML = `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="PSI maximo por chequeo en el tiempo">
+    ${gridlines}${thresholdLine}
+    <path d="${linePath}" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+    ${dots}${xTicks}
+  </svg>`;
+
+  container.querySelectorAll(".hit-dot").forEach((dot) => {
+    dot.addEventListener("mousemove", (e) => {
+      const t = new Date(dot.getAttribute("data-t"));
+      showTooltip(e.clientX, e.clientY,
+        `<b>PSI ${dot.getAttribute("data-val")}</b><div class="muted">Estacion ${dot.getAttribute("data-station")} · ${dot.getAttribute("data-feature")}</div><div class="muted">${t.toLocaleString("es-CO")}</div>`);
+    });
+    dot.addEventListener("mouseleave", hideTooltip);
+  });
+}
+
 function renderLastDriftEvent(driftEvents) {
   const el = document.getElementById("last-drift-event");
   const notable = driftEvents.find((e) => e.psi_flag || e.performance_flag);
@@ -529,6 +627,7 @@ async function refresh() {
     renderStationBars(data.stationAccuracy);
     renderDriftHeatmap(data.accuracyRows);
     renderStationSemaphore(data.driftEvents);
+    renderDriftPsiChart(data.driftEvents);
     renderLastDriftEvent(data.driftEvents);
     renderRetrainHistory(data.retrainTriggers);
     renderRunHistory(data.runs);
