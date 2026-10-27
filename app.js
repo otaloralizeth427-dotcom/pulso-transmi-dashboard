@@ -13,11 +13,22 @@ async function fetchView(name, query = "") {
   return res.json();
 }
 
+// PostgREST caps every response at 1000 rows, which silently cut the
+// accuracy history off after the first ~3 days. Page through it instead.
+async function fetchAllPages(name, query = "", pageSize = 1000) {
+  const out = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await fetchView(name, `${query}&limit=${pageSize}&offset=${offset}`);
+    out.push(...page);
+    if (page.length < pageSize) return out;
+  }
+}
+
 async function loadAll() {
   const [runs, models, accuracyRows, stationAccuracy, leaderboard, driftEvents, retrainTriggers] = await Promise.all([
     fetchView("v_pipeline_status", "&order=started_at.desc"),
     fetchView("v_model_state", "&order=trained_at.desc"),
-    fetchView("v_accuracy_timeseries", "&order=computed_at.asc"),
+    fetchAllPages("v_accuracy_timeseries", "&order=computed_at.asc"),
     fetchView("v_station_accuracy"),
     fetchView("v_leaderboard_snapshots", "&order=checked_at.desc"),
     fetchView("v_drift_events", "&order=checked_at.desc&limit=200"),
@@ -34,6 +45,30 @@ function parseNotes(notes) {
   const cycle = /cyc_[A-Za-z0-9_-]+/.exec(notes || "")?.[0] ?? null;
   const isSubmission = !!submissionId;
   return { submissionId, model, cycle, isSubmission };
+}
+
+/**
+ * One entry per submitted-and-evaluated cycle, rebuilt from the accuracy
+ * rows (each carries its run_id + run notes). v_pipeline_status only keeps
+ * the latest 50 runs, which after the competition data ran out are all
+ * post-close retries -- this is the actual record of what got submitted.
+ */
+function submittedCycles(accuracyRows) {
+  const byRun = new Map();
+  for (const r of accuracyRows) {
+    if (!byRun.has(r.run_id)) byRun.set(r.run_id, { runId: r.run_id, notes: r.run_notes, evaluatedAt: r.computed_at, sum: 0, n: 0 });
+    const g = byRun.get(r.run_id);
+    g.sum += r.accuracy;
+    g.n += 1;
+    if (r.computed_at > g.evaluatedAt) g.evaluatedAt = r.computed_at;
+  }
+  return [...byRun.values()]
+    .map((g) => ({ ...g, ...parseNotes(g.notes), accuracy: g.sum / g.n }))
+    .sort((a, b) => new Date(a.evaluatedAt) - new Date(b.evaluatedAt));
+}
+
+function fmtDate(dateIso) {
+  return new Date(dateIso).toLocaleDateString("es-CO", { day: "numeric", month: "short" });
 }
 
 function timeAgo(dateIso) {
@@ -71,25 +106,23 @@ function hideTooltip() {
 
 /* --------------------------------------------------- 1. status banner --- */
 
-function renderStatusBanner(runs) {
+function renderStatusBanner(accuracyRows) {
   const el = document.getElementById("status-banner");
-  const lastRun = runs[0];
-  const lastSubmission = runs.find((r) => parseNotes(r.notes).isSubmission && r.status === "success");
-
-  if (!lastRun) {
+  const cycles = submittedCycles(accuracyRows);
+  if (!cycles.length) {
     el.className = "status-banner state-warning";
-    el.innerHTML = `<span class="status-dot warning"></span><div><div class="label">Sin datos todavia</div><div class="detail">El pipeline no ha registrado ninguna corrida.</div></div>`;
+    el.innerHTML = `<span class="status-dot warning"></span><div><div class="label">Sin datos todavia</div><div class="detail">El pipeline no ha registrado ningun envio evaluado.</div></div>`;
     return;
   }
-
-  const healthy = lastRun.status === "success" && lastSubmission && (Date.now() - new Date(lastSubmission.started_at)) < 2 * 60 * 60 * 1000;
-  el.className = `status-banner ${healthy ? "state-good" : "state-critical"}`;
+  const first = cycles[0];
+  const last = cycles[cycles.length - 1];
+  const complete = cycles.filter((c) => c.n === STATIONS_ORDER.length * HORIZONS.length).length;
+  el.className = "status-banner state-good";
   el.innerHTML = `
-    <span class="status-dot ${healthy ? "good" : "critical"}"></span>
+    <span class="status-dot good"></span>
     <div>
-      <div class="label">${healthy ? "Pipeline operativo" : "Revisar pipeline"}</div>
-      <div class="detail">Ultima corrida: ${lastRun.status === "success" ? "exitosa" : "fallida"} ${timeAgo(lastRun.started_at)}
-        &middot; Ultimo envio oficial: ${lastSubmission ? timeAgo(lastSubmission.started_at) : "ninguno registrado"}</div>
+      <div class="label">Competencia finalizada · pipeline operado de forma autonoma del ${fmtDate(first.evaluatedAt)} al ${fmtDate(last.evaluatedAt)}</div>
+      <div class="detail">${cycles.length} ciclos enviados y evaluados &middot; ${complete} con las 48 predicciones completas (12 estaciones x 4 horizontes)</div>
     </div>`;
 }
 
@@ -114,8 +147,8 @@ function renderStatTiles({ runs, models, leaderboard, accuracyRows }) {
   const wrap = document.getElementById("stat-row");
   const active = models.find((m) => m.is_active) || models[0];
   const cumulative = latestByWindow(leaderboard, "cumulative");
-  const rolling = latestByWindow(leaderboard, "rolling_24h");
-  const successfulSubmissions = runs.filter((r) => r.status === "success" && parseNotes(r.notes).isSubmission).length;
+  const cycles = submittedCycles(accuracyRows);
+  const bestValidation = Math.max(...models.map((m) => m.metrics_summary?.candidate_accuracy ?? -Infinity));
   const last6 = last6CyclesApprox(accuracyRows);
 
   const tiles = [
@@ -127,7 +160,7 @@ function renderStatTiles({ runs, models, leaderboard, accuracyRows }) {
     {
       eyebrow: "Cobertura (acumulada)",
       value: cumulative ? fmtPct(cumulative.coverage * 100) : "—",
-      sub: `${successfulSubmissions} envios oficiales registrados`,
+      sub: `${cycles.length} envios oficiales evaluados`,
     },
     {
       eyebrow: "Leaderboard",
@@ -135,10 +168,9 @@ function renderStatTiles({ runs, models, leaderboard, accuracyRows }) {
       sub: cumulative ? `${fmtPct(cumulative.accuracy)} acumulada` : "Sin datos del leaderboard",
     },
     {
-      eyebrow: "Ultimas 24h",
-      value: rolling ? fmtPct(rolling.accuracy) : "—",
-      sub: rolling ? `Cobertura ${fmtPct(rolling.coverage * 100)}` : "Sin datos recientes",
-      alert: rolling && cumulative && cumulative.accuracy - rolling.accuracy >= 5,
+      eyebrow: "Mejor validacion",
+      value: Number.isFinite(bestValidation) ? fmtPct(bestValidation) : "—",
+      sub: "Accuracy de validacion (7 dias) del mejor candidato entrenado",
     },
     {
       eyebrow: "Ultimos 6 ciclos (aprox.)",
@@ -403,23 +435,43 @@ function renderDriftHeatmap(accuracyRows) {
 
 /* -------------------------------------------------- 6. run history ------ */
 
-function renderRunHistory(runs) {
+// Day the confirmed performance drift hit (see the retrain table): splits
+// the history summary into before/after so the drop reads with its cause.
+const DRIFT_ONSET = new Date("2026-10-01T00:00:00-05:00") // midnight Bogota;
+
+function periodSummary(cycles, from, to, label) {
+  const inPeriod = cycles.filter((c) => (!from || new Date(c.evaluatedAt) >= from) && (!to || new Date(c.evaluatedAt) < to));
+  if (!inPeriod.length) return "";
+  const mean = inPeriod.reduce((sum, c) => sum + c.accuracy, 0) / inPeriod.length;
+  const best = Math.max(...inPeriod.map((c) => c.accuracy));
+  return `<div class="stat-tile">
+    <div class="eyebrow">${fmtDate(inPeriod[0].evaluatedAt)} – ${fmtDate(inPeriod[inPeriod.length - 1].evaluatedAt)}</div>
+    <div class="value">${fmtPct(mean)}</div>
+    <div class="sub">${label} &middot; ${inPeriod.length} ciclos &middot; mejor ciclo ${fmtPct(best)}</div>
+  </div>`;
+}
+
+function renderRunHistory(accuracyRows) {
   const tbody = document.getElementById("run-history-body");
-  if (!runs.length) {
-    tbody.innerHTML = `<tr><td colspan="4" class="empty-note">Sin corridas registradas todavia.</td></tr>`;
+  const all = submittedCycles(accuracyRows);
+  document.getElementById("run-history-summary").innerHTML =
+    periodSummary(all, null, DRIFT_ONSET, "Accuracy promedio por ciclo") +
+    periodSummary(all, DRIFT_ONSET, null, "Tras el drift confirmado y los reentrenamientos");
+  const cycles = [...all].reverse();
+  if (!cycles.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-note">Sin envios evaluados todavia.</td></tr>`;
     return;
   }
-  tbody.innerHTML = runs
+  tbody.innerHTML = cycles
     .slice(0, 15)
-    .map((r) => {
-      const info = parseNotes(r.notes);
-      const pillClass = r.status === "success" ? "success" : r.status === "running" ? "running" : "failed";
-      const when = new Date(r.started_at).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    .map((c) => {
+      const when = new Date(c.evaluatedAt).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
       return `<tr>
         <td>${when}</td>
-        <td><span class="pill ${pillClass}">${r.status === "success" ? "Exito" : r.status === "running" ? "En curso" : "Fallo"}</span></td>
-        <td class="mono">${info.model || "—"}</td>
-        <td class="mono">${info.submissionId ? info.submissionId.slice(0, 14) + "…" : "—"}</td>
+        <td><span class="pill success">Enviado ${c.n}/48</span></td>
+        <td class="mono">${c.model || "—"}</td>
+        <td class="mono">${c.submissionId ? c.submissionId.slice(0, 14) + "…" : "—"}</td>
+        <td>${fmtPct(c.accuracy)}</td>
       </tr>`;
     })
     .join("");
@@ -620,7 +672,7 @@ async function refresh() {
   try {
     const data = await loadAll();
     window.__lastData = data;
-    renderStatusBanner(data.runs);
+    renderStatusBanner(data.accuracyRows);
     renderStatTiles(data);
     renderAccuracyChart(data);
     renderSubmissionQuality(data.accuracyRows);
@@ -630,7 +682,7 @@ async function refresh() {
     renderDriftPsiChart(data.driftEvents);
     renderLastDriftEvent(data.driftEvents);
     renderRetrainHistory(data.retrainTriggers);
-    renderRunHistory(data.runs);
+    renderRunHistory(data.accuracyRows);
     document.getElementById("last-updated").textContent = `Actualizado ${new Date().toLocaleTimeString("es-CO")}`;
   } catch (err) {
     console.error(err);

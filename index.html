@@ -17,7 +17,7 @@
     <div class="brand-mark">🚌</div>
     <div class="brand-text">
       <h1>Pulso TransMi</h1>
-      <p>Panel operativo · solo lectura</p>
+      <p>Pronostico de demanda MLOps · resultados de la competencia</p>
     </div>
   </div>
   <div id="last-updated" style="font-size:12px;color:var(--ink-muted)">Cargando…</div>
@@ -36,7 +36,6 @@
       </div>
       <div id="accuracy-tabs" class="tabs">
         <button data-tab="cumulative" class="active">Acumulada</button>
-        <button data-tab="rolling24h">Ultimas 24h</button>
       </div>
     </div>
     <div class="legend">
@@ -113,12 +112,13 @@
   <section class="card">
     <div class="card-header">
       <div>
-        <h2>Historial de corridas</h2>
-        <p class="caption">Ultimas ejecuciones del pipeline (collector + prediccion + envio).</p>
+        <h2>Historial de envios</h2>
+        <p class="caption">Ultimos ciclos enviados por el pipeline (collector + prediccion + envio) y su accuracy evaluada contra la demanda real. Se omiten los reintentos automaticos posteriores al cierre de la competencia, que ya no tenian ciclo que predecir.</p>
       </div>
     </div>
+    <div id="run-history-summary" class="stat-row" style="margin-bottom:16px"></div>
     <table class="runs">
-      <thead><tr><th>Cuando</th><th>Estado</th><th>Modelo</th><th>Submission</th></tr></thead>
+      <thead><tr><th>Evaluado</th><th>Estado</th><th>Modelo</th><th>Submission</th><th>Accuracy</th></tr></thead>
       <tbody id="run-history-body"></tbody>
     </table>
   </section>
