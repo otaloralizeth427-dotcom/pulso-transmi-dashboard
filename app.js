@@ -437,7 +437,7 @@ function renderDriftHeatmap(accuracyRows) {
 
 // Day the confirmed performance drift hit (see the retrain table): splits
 // the history summary into before/after so the drop reads with its cause.
-const DRIFT_ONSET = new Date("2026-10-01T00:00:00-05:00") // midnight Bogota;
+const DRIFT_ONSET = new Date("2026-10-01T00:00:00-05:00"); // midnight Bogota
 
 function periodSummary(cycles, from, to, label) {
   const inPeriod = cycles.filter((c) => (!from || new Date(c.evaluatedAt) >= from) && (!to || new Date(c.evaluatedAt) < to));
