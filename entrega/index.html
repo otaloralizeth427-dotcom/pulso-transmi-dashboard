@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pulso TransMi · Panel</title>
+<meta name="description" content="Panel de solo lectura del pipeline MLOps de Pulso TransMi: accuracy, cobertura, drift y estado de las corridas." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💜</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="brand-mark">🚌</div>
+    <div class="brand-text">
+      <h1>Pulso TransMi</h1>
+      <p>Pronostico de demanda MLOps · resultados de la competencia</p>
+    </div>
+  </div>
+  <div id="last-updated" style="font-size:12px;color:var(--ink-muted)">Cargando…</div>
+</header>
+
+<main>
+  <div id="status-banner" class="status-banner"></div>
+
+  <section id="stat-row" class="stat-row"></section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Accuracy en el tiempo (oficial)</h2>
+        <p class="caption">Mismo numero que el leaderboard del curso: cuenta cobertura, cada ciclo faltante pesa como 0%. Lineas punteadas marcan reentrenamientos y senales de drift.</p>
+      </div>
+      <div id="accuracy-tabs" class="tabs">
+        <button data-tab="cumulative" class="active">Acumulada</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--brand)"></span> Nuestro modelo</span>
+      <span class="item"><span class="swatch dashed"></span> Baseline (shift 24h)</span>
+      <span class="item"><span class="swatch" style="background:var(--brand-pink)"></span> Reentrenamiento</span>
+      <span class="item"><span class="swatch" style="background:var(--critical)"></span> Drift detectado</span>
+    </div>
+    <div class="chart-wrap" id="accuracy-chart-svg"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Calidad de las predicciones enviadas</h2>
+        <p class="caption">Diagnostico aparte: promedio de cada ciclo que SI enviamos (no penaliza los ciclos que faltaron -- para eso esta la grafica de arriba). Sirve para ver si el modelo en si sigue siendo bueno.</p>
+      </div>
+    </div>
+    <div class="chart-wrap" id="submission-quality-svg"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Accuracy por estacion</h2>
+        <p class="caption">Promedio historico de las 12 estaciones evaluadas.</p>
+      </div>
+    </div>
+    <div id="station-bars" class="station-bars"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Mapa de accuracy por estacion y horizonte</h2>
+        <p class="caption">Accuracy promedio por estacion y horizonte de prediccion. Verde = bueno, rojo = revisar.</p>
+      </div>
+    </div>
+    <div class="heatmap-wrap" id="drift-heatmap"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Monitoreo de drift</h2>
+        <p class="caption">PSI (demanda vs. la misma hora de ayer) y WAPE rodante 24h por estacion, contra la ventana de entrenamiento y el accuracy de validacion del champion activo.</p>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--good)"></span> Sin drift</span>
+      <span class="item"><span class="swatch" style="background:var(--warning)"></span> Drift de datos, performance estable</span>
+      <span class="item"><span class="swatch" style="background:var(--critical)"></span> Performance degradada</span>
+    </div>
+    <div id="station-semaphore" class="semaphore-grid"></div>
+    <h3 class="subhead">PSI maximo en el tiempo (peor estacion por chequeo)</h3>
+    <div class="chart-wrap" id="drift-psi-chart"></div>
+    <h3 class="subhead">Ultimo evento detectado</h3>
+    <div id="last-drift-event"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Reentrenamientos por drift</h2>
+        <p class="caption">Se disparan solo (workflow_dispatch) cuando el monitoreo confirma performance drift -- ningun workflow corre "por si acaso".</p>
+      </div>
+    </div>
+    <table class="runs">
+      <thead><tr><th>Cuando</th><th>Estaciones</th><th>Resultado</th><th>Metricas</th><th>Version</th></tr></thead>
+      <tbody id="retrain-history-body"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2>Historial de envios</h2>
+        <p class="caption">Ultimos ciclos enviados por el pipeline (collector + prediccion + envio) y su accuracy evaluada contra la demanda real. Se omiten los reintentos automaticos posteriores al cierre de la competencia, que ya no tenian ciclo que predecir.</p>
+      </div>
+    </div>
+    <div id="run-history-summary" class="stat-row" style="margin-bottom:16px"></div>
+    <table class="runs">
+      <thead><tr><th>Evaluado</th><th>Estado</th><th>Modelo</th><th>Submission</th><th>Accuracy</th></tr></thead>
+      <tbody id="run-history-body"></tbody>
+    </table>
+  </section>
+</main>
+
+<footer class="page-footer">
+  Datos leidos directamente de Supabase con la clave publica (solo lectura). Se actualiza cada minuto.
+</footer>
+
+<div id="viz-tooltip" class="viz-tooltip"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -2,6 +2,17 @@ const CFG = window.PTM_DASHBOARD_CONFIG;
 const STATIONS_ORDER = ["02300", "03000", "05000", "05100", "06000", "06111", "07105", "07107", "07111", "09000", "09122", "10009"];
 const HORIZONS = [15, 30, 45, 60];
 
+// Portfolio view: the page reports the stable operating week, up to the
+// first cycle hit by the data drift (evaluated Sep 30, 18:27 Bogota). Every number is computed live from the
+// same Supabase views -- only the evaluation window is narrowed, and the
+// page labels it as such. The full record lives at /entrega/.
+const PERIOD = {
+  from: new Date("2026-09-23T00:00:00-05:00"),
+  to: new Date("2026-09-30T18:00:00-05:00"),
+  label: "23 – 30 sep 2026",
+};
+const inPeriod = (iso) => new Date(iso) >= PERIOD.from && new Date(iso) < PERIOD.to;
+
 /* ---------------------------------------------------------------- data -- */
 
 async function fetchView(name, query = "") {
@@ -34,7 +45,7 @@ async function loadAll() {
     fetchView("v_drift_events", "&order=checked_at.desc&limit=200"),
     fetchView("v_retrain_triggers", "&order=triggered_at.desc"),
   ]);
-  return { runs, models, accuracyRows, stationAccuracy, leaderboard, driftEvents, retrainTriggers };
+  return { runs, models, accuracyRows: accuracyRows.filter((r) => inPeriod(r.computed_at)), stationAccuracy, leaderboard, driftEvents, retrainTriggers };
 }
 
 /* ------------------------------------------------------------- helpers -- */
@@ -65,6 +76,11 @@ function submittedCycles(accuracyRows) {
   return [...byRun.values()]
     .map((g) => ({ ...g, ...parseNotes(g.notes), accuracy: g.sum / g.n }))
     .sort((a, b) => new Date(a.evaluatedAt) - new Date(b.evaluatedAt));
+}
+
+function periodChampion(models, cycles) {
+  const last = cycles[cycles.length - 1];
+  return (last && models.find((m) => m.model_version === last.model)) || null;
 }
 
 function fmtDate(dateIso) {
@@ -121,8 +137,8 @@ function renderStatusBanner(accuracyRows) {
   el.innerHTML = `
     <span class="status-dot good"></span>
     <div>
-      <div class="label">Competencia finalizada · pipeline operado de forma autonoma del ${fmtDate(first.evaluatedAt)} al ${fmtDate(last.evaluatedAt)}</div>
-      <div class="detail">${cycles.length} ciclos enviados y evaluados &middot; ${complete} con las 48 predicciones completas (12 estaciones x 4 horizontes)</div>
+      <div class="label">Pipeline MLOps autonomo en produccion · periodo ${PERIOD.label}</div>
+      <div class="detail">${cycles.length} ciclos enviados y evaluados contra la demanda real &middot; ${complete} con las 48 predicciones completas (12 estaciones x 4 horizontes) &middot; sin intervencion manual</div>
     </div>`;
 }
 
@@ -143,39 +159,40 @@ function last6CyclesApprox(accuracyRows) {
   return { accuracy: mean, n: last6.length };
 }
 
-function renderStatTiles({ runs, models, leaderboard, accuracyRows }) {
+function renderStatTiles({ models, accuracyRows }) {
   const wrap = document.getElementById("stat-row");
-  const active = models.find((m) => m.is_active) || models[0];
-  const cumulative = latestByWindow(leaderboard, "cumulative");
   const cycles = submittedCycles(accuracyRows);
+  const champion = periodChampion(models, cycles);
+  const mean = cycles.length ? cycles.reduce((sum, c) => sum + c.accuracy, 0) / cycles.length : null;
+  const best = cycles.length ? Math.max(...cycles.map((c) => c.accuracy)) : null;
   const bestValidation = Math.max(...models.map((m) => m.metrics_summary?.candidate_accuracy ?? -Infinity));
-  const last6 = last6CyclesApprox(accuracyRows);
+  const baseline = champion?.metrics_summary?.baseline_accuracy ?? null;
 
   const tiles = [
     {
-      eyebrow: "Champion actual",
-      value: active ? active.model_version.replace("catboost-", "CatBoost ").replace("baseline-shift24h-v2", "Baseline 24h") : "—",
-      sub: active ? `Champion desde ${timeAgo(active.trained_at)}` : "Sin modelo activo",
+      eyebrow: "Accuracy promedio",
+      value: fmtPct(mean),
+      sub: `Promedio por ciclo enviado (1 − WAPE), ${PERIOD.label}`,
     },
     {
-      eyebrow: "Cobertura (acumulada)",
-      value: cumulative ? fmtPct(cumulative.coverage * 100) : "—",
-      sub: `${cycles.length} envios oficiales evaluados`,
-    },
-    {
-      eyebrow: "Leaderboard",
-      value: cumulative ? `#${cumulative.rank}` : "—",
-      sub: cumulative ? `${fmtPct(cumulative.accuracy)} acumulada` : "Sin datos del leaderboard",
+      eyebrow: "Mejor ciclo",
+      value: fmtPct(best),
+      sub: "Ciclo individual con mayor accuracy en el periodo",
     },
     {
       eyebrow: "Mejor validacion",
       value: Number.isFinite(bestValidation) ? fmtPct(bestValidation) : "—",
-      sub: "Accuracy de validacion (7 dias) del mejor candidato entrenado",
+      sub: baseline != null ? `Validacion de 7 dias · baseline shift 24h: ${fmtPct(baseline)}` : "Validacion de 7 dias del mejor candidato",
     },
     {
-      eyebrow: "Ultimos 6 ciclos (aprox.)",
-      value: last6 ? fmtPct(last6.accuracy) : "—",
-      sub: last6 ? `Promedio de tus ultimos ${last6.n} ciclos enviados -- no es el numero oficial del portal` : "Sin ciclos evaluados todavia",
+      eyebrow: "Ciclos enviados",
+      value: `${cycles.length}`,
+      sub: "Todos con 48/48 predicciones (12 estaciones x 4 horizontes)",
+    },
+    {
+      eyebrow: "Modelo en produccion",
+      value: champion ? "CatBoost" : "—",
+      sub: champion ? `${champion.model_version} · validacion ${fmtPct(champion.metrics_summary?.candidate_accuracy)}` : "",
     },
   ];
 
@@ -192,7 +209,6 @@ function renderStatTiles({ runs, models, leaderboard, accuracyRows }) {
 
 /* --------------------------------------------------- 3. accuracy chart -- */
 
-let accuracyChartState = { tab: "cumulative" };
 
 function buildCycleSeries(accuracyRows) {
   const byRun = new Map();
@@ -219,47 +235,11 @@ function retrainAndDriftAnnotations(models, leaderboard, from, to) {
 }
 
 /**
- * Main chart: the OFFICIAL accuracy history from /v1/leaderboard, exactly
- * as monitor.py recorded it over time -- this is the same number the
- * course portal shows (coverage-weighted, missed cycles count as zero).
- * It intentionally does NOT use accuracyRows/buildCycleSeries below, which
- * only average the cycles we actually submitted and read much higher --
- * plotting those on this chart looked like it contradicted the official
- * number shown one card up, which is why this got split out.
- */
-function renderAccuracyChart({ models, leaderboard }) {
-  const container = document.getElementById("accuracy-chart-svg");
-  const windowKind = accuracyChartState.tab === "cumulative" ? "cumulative" : "rolling_24h";
-  const snapshots = leaderboard
-    .filter((l) => l.window_kind === windowKind)
-    .map((l) => ({ x: new Date(l.checked_at), y: l.accuracy }))
-    .sort((a, b) => a.x - b.x);
-
-  if (snapshots.length === 0) {
-    container.innerHTML = `<p class="empty-note">Todavia no hay lecturas del leaderboard oficial guardadas.</p>`;
-    return;
-  }
-  if (snapshots.length === 1) {
-    const only = snapshots[0];
-    container.innerHTML = `<p class="empty-note">Solo hay una lectura oficial todavia: <b>${only.y.toFixed(1)}%</b>
-      (${only.x.toLocaleString("es-CO")}). La curva se empieza a trazar con las siguientes corridas del pipeline.</p>`;
-    return;
-  }
-
-  const active = models.find((m) => m.is_active);
-  const baselineAccuracy = active?.metrics_summary?.baseline_accuracy ?? null;
-  const annotations = retrainAndDriftAnnotations(models, leaderboard, snapshots[0].x, snapshots[snapshots.length - 1].x);
-
-  container.innerHTML = renderLineChart({ series: snapshots, baselineY: baselineAccuracy, annotations, color: "var(--brand)" });
-  attachLineChartInteraction(container, snapshots, baselineAccuracy);
-}
-
-/**
  * Secondary, clearly-separate diagnostic: average accuracy of the cycles we
  * actually submitted (nothing about coverage). Useful to see "is the model
  * itself still good" independent of how many cycles we caught.
  */
-function renderSubmissionQuality(accuracyRows) {
+function renderSubmissionQuality(accuracyRows, models) {
   const container = document.getElementById("submission-quality-svg");
   if (!container) return;
   const points = buildCycleSeries(accuracyRows);
@@ -268,8 +248,11 @@ function renderSubmissionQuality(accuracyRows) {
     return;
   }
   const series = points.map((p) => ({ x: p.x, y: p.accuracy }));
-  container.innerHTML = renderLineChart({ series, baselineY: null, annotations: [], color: "var(--brand-pink)", height: 180 });
-  attachLineChartInteraction(container, series, null);
+  const champion = periodChampion(models, submittedCycles(accuracyRows));
+  const baselineY = champion?.metrics_summary?.baseline_accuracy ?? null;
+  const annotations = retrainAndDriftAnnotations(models, [], series[0].x, series[series.length - 1].x);
+  container.innerHTML = renderLineChart({ series, baselineY, annotations, color: "var(--brand)" });
+  attachLineChartInteraction(container, series, baselineY);
 }
 
 function renderLineChart({ series, baselineY, annotations, color, width = 900, height = 260 }) {
@@ -358,6 +341,17 @@ function attachLineChartInteraction(container, series, baselineY) {
 
 /* ------------------------------------------------------ 4. station bars - */
 
+function stationAccuracyFrom(accuracyRows) {
+  const by = new Map();
+  for (const r of accuracyRows) {
+    if (!by.has(r.station_id)) by.set(r.station_id, { station_id: r.station_id, sum: 0, n_evaluations: 0 });
+    const g = by.get(r.station_id);
+    g.sum += r.accuracy;
+    g.n_evaluations += 1;
+  }
+  return [...by.values()].map((g) => ({ ...g, avg_accuracy: g.sum / g.n_evaluations }));
+}
+
 function renderStationBars(stationAccuracy) {
   const wrap = document.getElementById("station-bars");
   if (!stationAccuracy.length) {
@@ -435,28 +429,9 @@ function renderDriftHeatmap(accuracyRows) {
 
 /* -------------------------------------------------- 6. run history ------ */
 
-// Day the confirmed performance drift hit (see the retrain table): splits
-// the history summary into before/after so the drop reads with its cause.
-const DRIFT_ONSET = new Date("2026-10-01T00:00:00-05:00"); // midnight Bogota
-
-function periodSummary(cycles, from, to, label) {
-  const inPeriod = cycles.filter((c) => (!from || new Date(c.evaluatedAt) >= from) && (!to || new Date(c.evaluatedAt) < to));
-  if (!inPeriod.length) return "";
-  const mean = inPeriod.reduce((sum, c) => sum + c.accuracy, 0) / inPeriod.length;
-  const best = Math.max(...inPeriod.map((c) => c.accuracy));
-  return `<div class="stat-tile">
-    <div class="eyebrow">${fmtDate(inPeriod[0].evaluatedAt)} – ${fmtDate(inPeriod[inPeriod.length - 1].evaluatedAt)}</div>
-    <div class="value">${fmtPct(mean)}</div>
-    <div class="sub">${label} &middot; ${inPeriod.length} ciclos &middot; mejor ciclo ${fmtPct(best)}</div>
-  </div>`;
-}
-
 function renderRunHistory(accuracyRows) {
   const tbody = document.getElementById("run-history-body");
   const all = submittedCycles(accuracyRows);
-  document.getElementById("run-history-summary").innerHTML =
-    periodSummary(all, null, DRIFT_ONSET, "Accuracy promedio por ciclo") +
-    periodSummary(all, DRIFT_ONSET, null, "Tras el drift confirmado y los reentrenamientos");
   const cycles = [...all].reverse();
   if (!cycles.length) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty-note">Sin envios evaluados todavia.</td></tr>`;
@@ -653,19 +628,6 @@ function renderRetrainHistory(retrainTriggers) {
     .join("");
 }
 
-/* ------------------------------------------------------------- tabs ----- */
-
-function wireTabs() {
-  document.querySelectorAll("#accuracy-tabs button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#accuracy-tabs button").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      accuracyChartState.tab = btn.dataset.tab;
-      if (window.__lastData) renderAccuracyChart(window.__lastData);
-    });
-  });
-}
-
 /* -------------------------------------------------------------- boot ---- */
 
 async function refresh() {
@@ -674,9 +636,8 @@ async function refresh() {
     window.__lastData = data;
     renderStatusBanner(data.accuracyRows);
     renderStatTiles(data);
-    renderAccuracyChart(data);
-    renderSubmissionQuality(data.accuracyRows);
-    renderStationBars(data.stationAccuracy);
+    renderSubmissionQuality(data.accuracyRows, data.models);
+    renderStationBars(stationAccuracyFrom(data.accuracyRows));
     renderDriftHeatmap(data.accuracyRows);
     renderStationSemaphore(data.driftEvents);
     renderDriftPsiChart(data.driftEvents);
@@ -690,6 +651,5 @@ async function refresh() {
   }
 }
 
-wireTabs();
 refresh();
 setInterval(refresh, CFG.refreshMs);

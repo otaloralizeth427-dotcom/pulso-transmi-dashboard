@@ -269,7 +269,7 @@ svg.chart .gridline { stroke: var(--grid); stroke-width: 1; }
 .station-bar-row { display: grid; grid-template-columns: 56px 1fr 46px; align-items: center; gap: 10px; }
 .station-bar-row .sid { font-size: 12px; color: var(--ink-secondary); font-variant-numeric: tabular-nums; }
 .station-bar-track { background: var(--surface-2); border-radius: 6px; height: 14px; overflow: hidden; }
-.station-bar-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--brand-soft), var(--brand)); }
+.station-bar-fill { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--brand-soft), var(--brand)); }
 .station-bar-row .val { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-secondary); }
 
 /* Heatmap */

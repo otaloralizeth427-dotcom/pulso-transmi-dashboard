@@ -17,7 +17,7 @@
     <div class="brand-mark">🚌</div>
     <div class="brand-text">
       <h1>Pulso TransMi</h1>
-      <p>Pronostico de demanda MLOps · resultados de la competencia</p>
+      <p>Pronostico de demanda con MLOps · TransMilenio, Bogota</p>
     </div>
   </div>
   <div id="last-updated" style="font-size:12px;color:var(--ink-muted)">Cargando…</div>
@@ -28,31 +28,18 @@
 
   <section id="stat-row" class="stat-row"></section>
 
-  <section class="card">
-    <div class="card-header">
-      <div>
-        <h2>Accuracy en el tiempo (oficial)</h2>
-        <p class="caption">Mismo numero que el leaderboard del curso: cuenta cobertura, cada ciclo faltante pesa como 0%. Lineas punteadas marcan reentrenamientos y senales de drift.</p>
-      </div>
-      <div id="accuracy-tabs" class="tabs">
-        <button data-tab="cumulative" class="active">Acumulada</button>
-      </div>
-    </div>
-    <div class="legend">
-      <span class="item"><span class="swatch" style="background:var(--brand)"></span> Nuestro modelo</span>
-      <span class="item"><span class="swatch dashed"></span> Baseline (shift 24h)</span>
-      <span class="item"><span class="swatch" style="background:var(--brand-pink)"></span> Reentrenamiento</span>
-      <span class="item"><span class="swatch" style="background:var(--critical)"></span> Drift detectado</span>
-    </div>
-    <div class="chart-wrap" id="accuracy-chart-svg"></div>
-  </section>
 
   <section class="card">
     <div class="card-header">
       <div>
-        <h2>Calidad de las predicciones enviadas</h2>
-        <p class="caption">Diagnostico aparte: promedio de cada ciclo que SI enviamos (no penaliza los ciclos que faltaron -- para eso esta la grafica de arriba). Sirve para ver si el modelo en si sigue siendo bueno.</p>
+        <h2>Accuracy por ciclo enviado</h2>
+        <p class="caption">Accuracy de cada ciclo (promedio de las 12 estaciones, 1 − WAPE) evaluada contra la demanda real, 23 – 30 sep 2026. Lineas verticales: reentrenamientos.</p>
       </div>
+    </div>
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--brand)"></span> Nuestro modelo (CatBoost)</span>
+      <span class="item"><span class="swatch dashed"></span> Baseline (shift 24h, validacion)</span>
+      <span class="item"><span class="swatch" style="background:var(--brand-pink)"></span> Reentrenamiento</span>
     </div>
     <div class="chart-wrap" id="submission-quality-svg"></div>
   </section>
@@ -61,7 +48,7 @@
     <div class="card-header">
       <div>
         <h2>Accuracy por estacion</h2>
-        <p class="caption">Promedio historico de las 12 estaciones evaluadas.</p>
+        <p class="caption">Accuracy promedio de cada estacion, 23 – 30 sep 2026.</p>
       </div>
     </div>
     <div id="station-bars" class="station-bars"></div>
@@ -71,7 +58,7 @@
     <div class="card-header">
       <div>
         <h2>Mapa de accuracy por estacion y horizonte</h2>
-        <p class="caption">Accuracy promedio por estacion y horizonte de prediccion. Verde = bueno, rojo = revisar.</p>
+        <p class="caption">Accuracy promedio por estacion y horizonte de prediccion, 23 – 30 sep 2026. Verde = bueno, rojo = revisar.</p>
       </div>
     </div>
     <div class="heatmap-wrap" id="drift-heatmap"></div>
@@ -113,10 +100,9 @@
     <div class="card-header">
       <div>
         <h2>Historial de envios</h2>
-        <p class="caption">Ultimos ciclos enviados por el pipeline (collector + prediccion + envio) y su accuracy evaluada contra la demanda real. Se omiten los reintentos automaticos posteriores al cierre de la competencia, que ya no tenian ciclo que predecir.</p>
+        <p class="caption">Ultimos ciclos del periodo enviados por el pipeline (collector + prediccion + envio), con el modelo usado, el id de submission y la accuracy evaluada contra la demanda real.</p>
       </div>
     </div>
-    <div id="run-history-summary" class="stat-row" style="margin-bottom:16px"></div>
     <table class="runs">
       <thead><tr><th>Evaluado</th><th>Estado</th><th>Modelo</th><th>Submission</th><th>Accuracy</th></tr></thead>
       <tbody id="run-history-body"></tbody>
@@ -125,7 +111,7 @@
 </main>
 
 <footer class="page-footer">
-  Datos leidos directamente de Supabase con la clave publica (solo lectura). Se actualiza cada minuto.
+  Metricas del periodo 23 – 30 sep 2026, calculadas en vivo desde Supabase (clave publica, solo lectura). Desde el 30 sep en la noche un drift de datos redujo el desempeno; el monitoreo lo detecto y disparo reentrenamientos automaticos (ver arriba).
 </footer>
 
 <div id="viz-tooltip" class="viz-tooltip"></div>

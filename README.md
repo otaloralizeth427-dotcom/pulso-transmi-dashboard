@@ -31,3 +31,11 @@ en este repo ni llega al navegador.
 9. Posicion en el leaderboard del curso (via `leaderboard_snapshots`, que
    llena `monitor.py` server-side -- la API key de submissions nunca sale
    del pipeline)
+
+## Dos vistas
+
+- `/` -- vista de portafolio: mismas vistas de Supabase, filtradas al periodo
+  estable 23 - 30 sep 2026 (hasta el primer ciclo afectado por el drift). El
+  periodo esta rotulado en la pagina.
+- `/entrega/` -- copia congelada de la version entregada al curso: historial
+  completo, leaderboard oficial y la caida posterior al drift.
